@@ -127,7 +127,7 @@ mod tests {
         let resolved =
             find_codex_home_from_env(/*codex_home_env*/ None).expect("default ZCODE_HOME");
         let mut expected = home_dir().expect("home dir");
-        expected.push(".codex");
+        expected.push(".zcode");
         let expected = AbsolutePathBuf::from_absolute_path(expected).expect("absolute home");
         assert_eq!(resolved, expected);
     }
