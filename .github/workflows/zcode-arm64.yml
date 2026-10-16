@@ -1,0 +1,60 @@
+name: Zcode macOS ARM64 release
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * *"
+permissions:
+  contents: write
+concurrency:
+  group: zcode-upstream
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge upstream
+        run: |
+          set -euo pipefail
+          git config user.name zcode-bot
+          git config user.email zcode-bot@users.noreply.github.com
+          git remote add upstream https://github.com/openai/codex.git
+          git fetch upstream main
+          git merge --no-edit upstream/main
+          echo "COMMIT_SHA=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+      - name: Check architecture
+        run: test "$(uname -m)" = arm64
+      - name: Install prerequisites
+        run: brew install protobuf
+      - name: Build Zcode
+        working-directory: codex-rs
+        env:
+          OTEL_SDK_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p codex-cli --bin zcode
+          file target/release/zcode
+          ./target/release/zcode --version
+      - name: Package binary
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp codex-rs/target/release/zcode dist/zcode
+          tar -czf "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" -C dist zcode
+          shasum -a 256 "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" > "zcode-macos-arm64-${COMMIT_SHA}.tar.gz.sha256"
+      - name: Push successfully built sync
+        run: git push origin HEAD:main
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="zcode-${COMMIT_SHA}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Already published: $tag"
+            exit 0
+          fi
+          gh release create "$tag" "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" "zcode-macos-arm64-${COMMIT_SHA}.tar.gz.sha256" --target "$(git rev-parse HEAD)" --title "Zcode macOS ARM64 ${COMMIT_SHA}" --notes "Automated build of Zcode. Upstream merged only when conflict-free and build succeeds."
