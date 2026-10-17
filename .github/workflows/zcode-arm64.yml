@@ -1,22 +1,29 @@
-name: Zcode macOS ARM64 release
+name: Zcode macOS ARM64 candidate
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "codex-rs/**"
+      - ".github/workflows/zcode-arm64.yml"
+      - ".github/scripts/zcode-smoke.sh"
   schedule:
     - cron: "23 3 * * *"
 permissions:
-  contents: write
+  contents: read
 concurrency:
-  group: zcode-upstream
+  group: zcode-arm64-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Merge upstream
+          persist-credentials: false
+      - name: Merge upstream for scheduled validation
+        if: github.event_name == 'schedule'
         run: |
           set -euo pipefail
           git config user.name zcode-bot
@@ -24,37 +31,56 @@ jobs:
           git remote add upstream https://github.com/openai/codex.git
           git fetch upstream main
           git merge --no-edit upstream/main
-          echo "COMMIT_SHA=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+      - name: Record tested revision
+        run: |
+          echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git show --no-patch --format=fuller HEAD >> "$GITHUB_STEP_SUMMARY"
       - name: Check architecture
         run: test "$(uname -m)" = arm64
       - name: Install prerequisites
         run: brew install protobuf
+      - name: Cache Cargo downloads and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codex-rs/target
+          key: zcode-arm64-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            zcode-arm64-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      - name: Test home directory resolution
+        working-directory: codex-rs
+        run: cargo test --locked -p codex-utils-home-dir
       - name: Build Zcode
         working-directory: codex-rs
-        env:
-          OTEL_SDK_DISABLED: "true"
-        run: |
-          set -euo pipefail
-          cargo build --locked --release -p codex-cli --bin zcode
-          file target/release/zcode
-          ./target/release/zcode --version
-      - name: Package binary
+        run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin zcode
+      - name: Smoke test ARM64 binary
+        run: bash .github/scripts/zcode-smoke.sh codex-rs/target/aarch64-apple-darwin/release/zcode
+      - name: Package candidate
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp codex-rs/target/release/zcode dist/zcode
-          tar -czf "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" -C dist zcode
+          cp codex-rs/target/aarch64-apple-darwin/release/zcode dist/zcode
+          git show --no-patch --format=fuller HEAD > dist/REVISION.txt
+          tar -czf "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" -C dist zcode REVISION.txt
           shasum -a 256 "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" > "zcode-macos-arm64-${COMMIT_SHA}.tar.gz.sha256"
-      - name: Push successfully built sync
-        run: git push origin HEAD:main
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Retain candidate independently of branch updates
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-macos-arm64-${{ env.COMMIT_SHA }}
+          path: |
+            zcode-macos-arm64-*.tar.gz
+            zcode-macos-arm64-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Report remaining release gates
         run: |
-          set -euo pipefail
-          tag="zcode-${COMMIT_SHA}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Already published: $tag"
-            exit 0
-          fi
-          gh release create "$tag" "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" "zcode-macos-arm64-${COMMIT_SHA}.tar.gz.sha256" --target "$(git rev-parse HEAD)" --title "Zcode macOS ARM64 ${COMMIT_SHA}" --notes "Automated build of Zcode. Upstream merged only when conflict-free and build succeeds."
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Candidate only. Automatic public releases remain disabled until ZCODE.md acceptance passes.
+          This workflow validates ARM64 compilation, home-dir unit tests and CLI smoke tests.
+          It does not certify zero telemetry, full credential/cache isolation, AgentD recognition,
+          a fresh authenticated session, or coexistence with official Codex.
+          Scheduled upstream merges are tested locally; upstream updates must land through review.
+          EOF
+
