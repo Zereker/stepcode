@@ -1,0 +1,80 @@
+name: Zcode macOS ARM64 prerelease
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "codex-rs/**"
+      - ".github/scripts/zcode-smoke.sh"
+      - ".github/workflows/zcode-release.yml"
+      - ".github/workflows/zcode-arm64.yml"
+permissions:
+  contents: write
+concurrency:
+  group: zcode-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'Zereker/zcode'
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify runner
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+      - name: Install protobuf
+        run: brew install protobuf
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codex-rs/target
+          key: zcode-release-arm64-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            zcode-release-arm64-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
+      - name: Test isolated home directory
+        working-directory: codex-rs
+        run: cargo test --locked -p codex-utils-home-dir
+      - name: Build arm64 executable
+        working-directory: codex-rs
+        env:
+          OTEL_SDK_DISABLED: "true"
+        run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin zcode
+      - name: Smoke test
+        run: bash .github/scripts/zcode-smoke.sh codex-rs/target/aarch64-apple-darwin/release/zcode
+      - name: Package and hash
+        run: |
+          set -euo pipefail
+          sha="${GITHUB_SHA:0:12}"
+          tag="zcode-${sha}"
+          mkdir -p dist
+          cp codex-rs/target/aarch64-apple-darwin/release/zcode dist/zcode
+          printf '%s\n' "$GITHUB_SHA" > dist/REVISION.txt
+          tar -czf "zcode-macos-arm64-${sha}.tar.gz" -C dist zcode REVISION.txt
+          shasum -a 256 "zcode-macos-arm64-${sha}.tar.gz" > "zcode-macos-arm64-${sha}.tar.gz.sha256"
+          echo "ZCODE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "ZCODE_SHA=$sha" >> "$GITHUB_ENV"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zcode-macos-arm64-${{ env.ZCODE_SHA }}
+          path: |
+            zcode-macos-arm64-*.tar.gz
+            zcode-macos-arm64-*.tar.gz.sha256
+          if-no-files-found: error
+      - name: Publish prerelease from tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$ZCODE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $ZCODE_TAG"
+            exit 0
+          fi
+          gh release create "$ZCODE_TAG"             "zcode-macos-arm64-${ZCODE_SHA}.tar.gz"             "zcode-macos-arm64-${ZCODE_SHA}.tar.gz.sha256"             --target "$GITHUB_SHA"             --title "Zcode macOS ARM64 ${ZCODE_SHA}"             --prerelease             --notes "Automated ARM64 candidate build from tested commit $GITHUB_SHA. Not yet certified for full telemetry removal, AgentD classification, or complete data isolation; see ZCODE.md."
