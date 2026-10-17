@@ -10,6 +10,7 @@ on:
       - '.github/workflows/zcode-arm64.yml'
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: zcode-arm64-publish
   cancel-in-progress: false
@@ -31,33 +32,63 @@ jobs:
           ref: main
           path: codex-upstream
           persist-credentials: false
+      - name: Check existing release for exact upstream revision
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git -C codex-upstream rev-parse HEAD)"
+          short="${sha:0:12}"
+          echo "UPSTREAM_SHA=$sha" >> "$GITHUB_ENV"
+          echo "UPSTREAM_SHORT=$short" >> "$GITHUB_ENV"
+          if gh release view "zcode-$short" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "build_needed=false" >> "$GITHUB_OUTPUT"
+            echo "Already released upstream $sha; skip expensive build." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "build_needed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Apply minimal fail-closed identity patch
+        if: steps.check.outputs.build_needed == 'true'
         run: python3 zcode-build/scripts/apply-zcode.py codex-upstream
       - name: Confirm Apple Silicon runner
+        if: steps.check.outputs.build_needed == 'true'
         run: |
           test "$(uname -s)" = Darwin
           test "$(uname -m)" = arm64
       - name: Install protobuf
+        if: steps.check.outputs.build_needed == 'true'
         run: brew install protobuf
-      - name: Cache Rust
+      - name: Cache Cargo downloads
+        if: steps.check.outputs.build_needed == 'true'
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            codex-upstream/codex-rs/target
-          key: zcode-arm64-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock', 'codex-upstream/codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+          key: zcode-cargo-${{ runner.os }}-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock') }}
           restore-keys: |
-            zcode-arm64-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock', 'codex-upstream/codex-rs/rust-toolchain.toml') }}-
+            zcode-cargo-${{ runner.os }}-
+      - name: Setup shared Rust compiler cache
+        if: steps.check.outputs.build_needed == 'true'
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Configure compiler cache
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       - name: Test Zcode home resolution
+        if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
         run: cargo test --locked -p codex-utils-home-dir
       - name: Compile upstream as Zcode
+        if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
         env:
           OTEL_SDK_DISABLED: 'true'
         run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin zcode
       - name: Smoke test main executable
+        if: steps.check.outputs.build_needed == 'true'
         run: |
           set -euo pipefail
           bin="codex-upstream/codex-rs/target/aarch64-apple-darwin/release/zcode"
@@ -67,10 +98,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/zcode-home"
           ZCODE_HOME="$RUNNER_TEMP/zcode-home" "$bin" --help >/dev/null
       - name: Determine official revision
+        if: steps.check.outputs.build_needed == 'true'
         run: |
           echo "UPSTREAM_SHA=$(git -C codex-upstream rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "UPSTREAM_SHORT=$(git -C codex-upstream rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
       - name: Package and checksum
+        if: steps.check.outputs.build_needed == 'true'
         run: |
           set -euo pipefail
           mkdir dist
@@ -79,6 +112,7 @@ jobs:
           tar -czf "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" -C dist zcode REVISION.txt
           shasum -a 256 "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" > "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256"
       - name: Upload tested candidate
+        if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: zcode-macos-arm64-${{ env.UPSTREAM_SHORT }}
@@ -87,6 +121,7 @@ jobs:
             zcode-macos-arm64-*.sha256
           if-no-files-found: error
       - name: Publish prerelease
+        if: steps.check.outputs.build_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
