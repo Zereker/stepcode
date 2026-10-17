@@ -13,7 +13,7 @@ permissions:
   actions: write
 concurrency:
   group: zcode-arm64-publish
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     if: github.repository == 'Zereker/zcode'
@@ -120,6 +120,17 @@ jobs:
             zcode-macos-arm64-*.tar.gz
             zcode-macos-arm64-*.sha256
           if-no-files-found: error
+      - name: Verify release still targets current Zcode recipe
+        if: steps.check.outputs.build_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq '.sha')"
+          if [ "$current" != "$GITHUB_SHA" ]; then
+            echo "Build recipe changed during compile: refusing stale release" >&2
+            exit 1
+          fi
       - name: Publish prerelease
         if: steps.check.outputs.build_needed == 'true'
         env:
