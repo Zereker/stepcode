@@ -1,86 +1,106 @@
-name: Zcode macOS ARM64 candidate
+name: Zcode ARM64 (upstream build)
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "codex-rs/**"
-      - ".github/workflows/zcode-arm64.yml"
-      - ".github/scripts/zcode-smoke.sh"
   schedule:
-    - cron: "23 3 * * *"
+    - cron: '23 3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/apply-zcode.py'
+      - '.github/workflows/zcode-arm64.yml'
 permissions:
-  contents: read
+  contents: write
 concurrency:
-  group: zcode-arm64-${{ github.event.pull_request.number || github.ref }}
+  group: zcode-arm64-publish
   cancel-in-progress: false
 jobs:
   build:
+    if: github.repository == 'Zereker/zcode'
     runs-on: macos-15
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Zcode build recipes
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          path: zcode-build
           persist-credentials: false
-      - name: Merge upstream for scheduled validation
-        if: github.event_name == 'schedule'
+      - name: Checkout current official Codex
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: main
+          path: codex-upstream
+          persist-credentials: false
+      - name: Apply minimal fail-closed identity patch
+        run: python3 zcode-build/scripts/apply-zcode.py codex-upstream
+      - name: Confirm Apple Silicon runner
         run: |
-          set -euo pipefail
-          git config user.name zcode-bot
-          git config user.email zcode-bot@users.noreply.github.com
-          git remote add upstream https://github.com/openai/codex.git
-          git fetch upstream main
-          git merge --no-edit upstream/main
-      - name: Record tested revision
-        run: |
-          echo "COMMIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          git show --no-patch --format=fuller HEAD >> "$GITHUB_STEP_SUMMARY"
-      - name: Check architecture
-        run: test "$(uname -m)" = arm64
-      - name: Install prerequisites
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+      - name: Install protobuf
         run: brew install protobuf
-      - name: Cache Cargo downloads and build outputs
+      - name: Cache Rust
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            codex-rs/target
-          key: zcode-arm64-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
+            codex-upstream/codex-rs/target
+          key: zcode-arm64-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock', 'codex-upstream/codex-rs/rust-toolchain.toml') }}-${{ github.sha }}
           restore-keys: |
-            zcode-arm64-v1-${{ hashFiles('codex-rs/Cargo.lock', 'codex-rs/rust-toolchain.toml') }}-
-      - name: Test home directory resolution
-        working-directory: codex-rs
+            zcode-arm64-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock', 'codex-upstream/codex-rs/rust-toolchain.toml') }}-
+      - name: Test Zcode home resolution
+        working-directory: codex-upstream/codex-rs
         run: cargo test --locked -p codex-utils-home-dir
-      - name: Build Zcode
-        working-directory: codex-rs
+      - name: Compile upstream as Zcode
+        working-directory: codex-upstream/codex-rs
+        env:
+          OTEL_SDK_DISABLED: 'true'
         run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin zcode
-      - name: Smoke test ARM64 binary
-        run: bash .github/scripts/zcode-smoke.sh codex-rs/target/aarch64-apple-darwin/release/zcode
-      - name: Package candidate
+      - name: Smoke test main executable
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp codex-rs/target/aarch64-apple-darwin/release/zcode dist/zcode
-          git show --no-patch --format=fuller HEAD > dist/REVISION.txt
-          tar -czf "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" -C dist zcode REVISION.txt
-          shasum -a 256 "zcode-macos-arm64-${COMMIT_SHA}.tar.gz" > "zcode-macos-arm64-${COMMIT_SHA}.tar.gz.sha256"
-      - name: Retain candidate independently of branch updates
+          bin="codex-upstream/codex-rs/target/aarch64-apple-darwin/release/zcode"
+          file "$bin" | grep -q 'Mach-O 64-bit executable arm64'
+          "$bin" --help | grep -q zcode
+          "$bin" --version
+          mkdir -p "$RUNNER_TEMP/zcode-home"
+          ZCODE_HOME="$RUNNER_TEMP/zcode-home" "$bin" --help >/dev/null
+      - name: Determine official revision
+        run: |
+          echo "UPSTREAM_SHA=$(git -C codex-upstream rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_SHORT=$(git -C codex-upstream rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
+      - name: Package and checksum
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp codex-upstream/codex-rs/target/aarch64-apple-darwin/release/zcode dist/zcode
+          printf 'upstream=%s\nzcode_build=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" > dist/REVISION.txt
+          tar -czf "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" -C dist zcode REVISION.txt
+          shasum -a 256 "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" > "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256"
+      - name: Upload tested candidate
         uses: actions/upload-artifact@v4
         with:
-          name: zcode-macos-arm64-${{ env.COMMIT_SHA }}
+          name: zcode-macos-arm64-${{ env.UPSTREAM_SHORT }}
           path: |
             zcode-macos-arm64-*.tar.gz
-            zcode-macos-arm64-*.tar.gz.sha256
+            zcode-macos-arm64-*.sha256
           if-no-files-found: error
-          retention-days: 14
-      - name: Report remaining release gates
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          Candidate only. Automatic public releases remain disabled until ZCODE.md acceptance passes.
-          This workflow validates ARM64 compilation, home-dir unit tests and CLI smoke tests.
-          It does not certify zero telemetry, full credential/cache isolation, AgentD recognition,
-          a fresh authenticated session, or coexistence with official Codex.
-          Scheduled upstream merges are tested locally; upstream updates must land through review.
-          EOF
-
+          set -euo pipefail
+          tag="zcode-${UPSTREAM_SHORT}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Already published $tag"
+            exit 0
+          fi
+          gh release create "$tag" \
+            "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" \
+            "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Zcode ARM64 (Codex ${UPSTREAM_SHORT})" \
+            --prerelease \
+            --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Zcode identity patch. This is a prerelease; telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
