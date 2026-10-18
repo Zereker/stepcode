@@ -27,29 +27,31 @@ jobs:
         with:
           path: stepcode-build
           persist-credentials: false
-      - name: Checkout current official Codex
-        uses: actions/checkout@v4
-        with:
-          repository: openai/codex
-          ref: main
-          path: codex-upstream
-          persist-credentials: false
-      - name: Check existing release for exact upstream revision
+      - name: Resolve latest official stable Codex Release
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          sha="$(git -C codex-upstream rev-parse HEAD)"
-          short="${sha:0:12}"
-          echo "UPSTREAM_SHA=$sha" >> "$GITHUB_ENV"
-          echo "UPSTREAM_SHORT=$short" >> "$GITHUB_ENV"
-          if gh release view "stepcode-$short-${GITHUB_SHA:0:8}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # GitHub's /releases/latest excludes drafts and prereleases.
+          tag="$(gh api repos/openai/codex/releases/latest --jq .tag_name)"
+          test -n "$tag"
+          echo "UPSTREAM_TAG=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "stepcode-$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "build_needed=false" >> "$GITHUB_OUTPUT"
-            echo "Already released upstream $sha; skip expensive build." >> "$GITHUB_STEP_SUMMARY"
+            echo "Stepcode for stable Codex release $tag already exists." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "build_needed=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Checkout official stable Codex release
+        if: steps.check.outputs.build_needed == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: openai/codex
+          ref: ${{ steps.check.outputs.tag }}
+          path: codex-upstream
+          persist-credentials: false
       - name: Apply minimal fail-closed identity patch
         if: steps.check.outputs.build_needed == 'true'
         run: python3 stepcode-build/scripts/apply-zcode.py codex-upstream
@@ -97,7 +99,6 @@ jobs:
         if: steps.check.outputs.build_needed == 'true'
         run: |
           echo "UPSTREAM_SHA=$(git -C codex-upstream rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "UPSTREAM_SHORT=$(git -C codex-upstream rev-parse --short=12 HEAD)" >> "$GITHUB_ENV"
       - name: Package and checksum
         if: steps.check.outputs.build_needed == 'true'
         run: |
@@ -120,13 +121,13 @@ jobs:
           }, indent=2) + "\n")
           PY
           printf 'upstream=%s\nstepcode_build=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" > dist/REVISION.txt
-          tar -czf "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
-          shasum -a 256 "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" > "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256"
+          tar -czf "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
+          shasum -a 256 "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" > "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz.sha256"
       - name: Upload tested candidate
         if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: stepcode-macos-arm64-${{ env.UPSTREAM_SHORT }}
+          name: stepcode-macos-arm64-${{ env.UPSTREAM_TAG }}
           path: |
             stepcode-macos-arm64-*.tar.gz
             stepcode-macos-arm64-*.sha256
@@ -142,22 +143,21 @@ jobs:
             echo "Build recipe changed during compile: refusing stale release" >&2
             exit 1
           fi
-      - name: Publish prerelease
+      - name: Publish Stepcode release
         if: steps.check.outputs.build_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="stepcode-${UPSTREAM_SHORT}-${GITHUB_SHA:0:8}"
+          tag="stepcode-${UPSTREAM_TAG}"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Already published $tag"
             exit 0
           fi
           gh release create "$tag" \
-            "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" \
-            "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256" \
+            "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" \
+            "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Stepcode ARM64 (Codex ${UPSTREAM_SHORT})" \
-            --prerelease \
-            --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Stepcode identity patch. This is a prerelease; telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
+            --title "Stepcode ARM64 (${UPSTREAM_TAG})" \
+            --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Stepcode identity patch. Telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
