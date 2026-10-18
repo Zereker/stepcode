@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the minimal Zcode identity patch to a clean upstream Codex checkout.
+"""Apply the minimal Stepcode identity patch to a clean upstream Codex checkout.
 
 Usage: python3 scripts/apply-zcode.py PATH_TO_CODEX_ROOT
 Fails closed if upstream markers move; do not silently ship unpatched Codex.
@@ -9,7 +9,7 @@ import sys
 
 root = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None
 if not root or not (root / "codex-rs" / "Cargo.toml").is_file():
-    raise SystemExit("Usage: apply-zcode.py PATH_TO_CODEX_ROOT")
+    raise SystemExit("Usage: apply-stepcode.py PATH_TO_CODEX_ROOT")
 
 def patch(rel, edits):
     path = root / rel
@@ -23,18 +23,18 @@ def patch(rel, edits):
     path.write_text(result)
 
 patch("codex-rs/cli/Cargo.toml", [
-    ('default-run = "codex"', 'default-run = "zcode"'),
-    ('name = "codex"\npath = "src/main.rs"', 'name = "zcode"\npath = "src/main.rs"'),
+    ('default-run = "codex"', 'default-run = "stepcode"'),
+    ('name = "codex"\npath = "src/main.rs"', 'name = "stepcode"\npath = "src/main.rs"'),
 ])
 patch("codex-rs/cli/src/main.rs", [
-    ('bin_name = "codex",', 'bin_name = "zcode",'),
+    ('bin_name = "codex",', 'bin_name = "stepcode",'),
     ('override_usage = "codex [OPTIONS] [PROMPT]\\n       codex [OPTIONS] <COMMAND> [ARGS]"',
-     'override_usage = "zcode [OPTIONS] [PROMPT]\\n       zcode [OPTIONS] <COMMAND> [ARGS]"'),
+     'override_usage = "stepcode [OPTIONS] [PROMPT]\\n       stepcode [OPTIONS] <COMMAND> [ARGS]"'),
 ])
 patch("codex-rs/utils/home-dir/src/lib.rs", [
-    ('std::env::var("CODEX_HOME")', 'std::env::var("ZCODE_HOME")'),
-    ('p.push(".codex");', 'p.push(".zcode");'),
-    ('expected.push(".codex");', 'expected.push(".zcode");'),
+    ('std::env::var("CODEX_HOME")', 'std::env::var("STEPCODE_HOME")'),
+    ('p.push(".codex");', 'p.push(".stepcode");'),
+    ('expected.push(".codex");', 'expected.push(".stepcode");'),
 ])
 # Inspired by Mabikega/codex-slop-fork: disable analytics by default.
 # Also disable the default Statsig metrics exporter; default-off is not a
@@ -48,16 +48,16 @@ patch("codex-rs/tui/src/daemon_telemetry.rs", [
 patch("codex-rs/config/src/types.rs", [
     ('metrics_exporter: OtelExporterKind::Statsig,', 'metrics_exporter: OtelExporterKind::None,'),
 ])
-# Adapt the upstream daemon package installer to the Zcode executable name.
+# Adapt the upstream daemon package installer to the Stepcode executable name.
 # Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
 patch("codex-rs/app-server-daemon/src/prepare_install.rs", [
-    ('"bin/codex.exe"', '"bin/zcode.exe"'),
-    ('        "bin/codex"\n', '        "bin/zcode"\n'),
-    ('symlink("bin/codex",', 'symlink("bin/zcode",'),
+    ('"bin/codex.exe"', '"bin/stepcode.exe"'),
+    ('        "bin/codex"\n', '        "bin/stepcode"\n'),
+    ('symlink("bin/codex",', 'symlink("bin/stepcode",'),
 ])
 patch("codex-rs/app-server-daemon/src/managed_install.rs", [
     ('if cfg!(windows) { "codex.exe" } else { "codex" }',
-     'if cfg!(windows) { "zcode.exe" } else { "zcode" }'),
+     'if cfg!(windows) { "stepcode.exe" } else { "stepcode" }'),
 ])
-print("Applied Zcode identity patch and default-off analytics/metrics patch")
+print("Applied Stepcode identity patch and default-off analytics/metrics patch")
 
