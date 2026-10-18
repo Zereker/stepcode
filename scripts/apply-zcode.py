@@ -36,4 +36,17 @@ patch("codex-rs/utils/home-dir/src/lib.rs", [
     ('p.push(".codex");', 'p.push(".zcode");'),
     ('expected.push(".codex");', 'expected.push(".zcode");'),
 ])
-print("Applied minimal Zcode patch (binary identity + ZCODE_HOME + ~/.zcode)")
+# Inspired by Mabikega/codex-slop-fork: disable analytics by default.
+# Also disable the default Statsig metrics exporter; default-off is not a
+# complete runtime guarantee against explicitly configured exporters.
+patch("codex-rs/exec/src/lib.rs", [
+    ('const DEFAULT_ANALYTICS_ENABLED: bool = true;', 'const DEFAULT_ANALYTICS_ENABLED: bool = false;'),
+])
+patch("codex-rs/tui/src/daemon_telemetry.rs", [
+    ('/*default_analytics_enabled*/ true,', '/*default_analytics_enabled*/ false,'),
+])
+patch("codex-rs/config/src/types.rs", [
+    ('metrics_exporter: OtelExporterKind::Statsig,', 'metrics_exporter: OtelExporterKind::None,'),
+])
+print("Applied Zcode identity patch and default-off analytics/metrics patch")
+
