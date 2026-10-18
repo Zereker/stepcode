@@ -100,6 +100,42 @@ jobs:
             ${{ runner.temp }}/stepcode-Cargo.lock.patch
             ${{ runner.temp }}/stepcode-Cargo.lock.sha256
           if-no-files-found: error
+      - name: Fetch verified official Codex V8 sandbox build
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: codex-upstream
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import tomllib
+          with open('codex-rs/Cargo.lock', 'rb') as f:
+              packages = tomllib.load(f)['package']
+          versions = {p['version'] for p in packages if p['name'] == 'v8'}
+          if len(versions) != 1:
+              raise SystemExit(f'Expected exactly one v8 version, found {versions}')
+          print(versions.pop())
+          PY
+          )"
+          target="aarch64-apple-darwin"
+          stem="ptrcomp_sandbox_release_${target}"
+          archive="librusty_v8_${stem}.a.gz"
+          binding="src_binding_${stem}.rs"
+          checksums="rusty_v8_${stem}.sha256"
+          base="https://github.com/openai/codex/releases/download/rusty-v8-v${version}"
+          dir="${RUNNER_TEMP}/rusty-v8"
+          mkdir -p "$dir"
+          trusted="third_party/v8/rusty_v8_${version//./_}_release_manifests.sha256"
+          test -f "$trusted"
+          curl -fsSL --retry 3 "$base/$checksums" -o "$dir/$checksums"
+          expected="$(awk -v file="$checksums" '$2 == file {print $1}' "$trusted")"
+          test -n "$expected"
+          actual="$(shasum -a 256 "$dir/$checksums" | awk '{print $1}')"
+          test "$actual" = "$expected"
+          curl -fsSL --retry 3 "$base/$archive" -o "$dir/$archive"
+          curl -fsSL --retry 3 "$base/$binding" -o "$dir/$binding"
+          test "$(wc -l < "$dir/$checksums" | tr -d ' ')" = 2
+          (cd "$dir" && tr -d '\r' < "$checksums" | shasum -a 256 -c -)
+          echo "RUSTY_V8_ARCHIVE=$dir/$archive" >> "$GITHUB_ENV"
+          echo "RUSTY_V8_SRC_BINDING_PATH=$dir/$binding" >> "$GITHUB_ENV"
       - name: Test Stepcode home resolution
         if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
