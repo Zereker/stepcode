@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/apply-zcode.py'
+      - 'scripts/update-homebrew-formula.py'
       - '.github/workflows/zcode-arm64.yml'
 permissions:
   contents: write
@@ -161,3 +162,43 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Stepcode ARM64 (${UPSTREAM_TAG})" \
             --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Stepcode identity patch. Telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
+
+      - name: Generate Homebrew formula from verified release
+        if: steps.check.outputs.build_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="stepcode-${UPSTREAM_TAG}"
+          filename="stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz"
+          digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq ".assets[] | select(.name == \"$filename\") | .digest")"
+          test "${digest#sha256:}" != "$digest"
+          sha="${digest#sha256:}"
+          python3 stepcode-build/scripts/update-homebrew-formula.py --tag "$tag" --sha256 "$sha"
+          ruby -c Formula/stepcode.rb
+      - name: Upload Homebrew formula candidate
+        if: steps.check.outputs.build_needed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stepcode-homebrew-formula-${{ env.UPSTREAM_TAG }}
+          path: Formula/stepcode.rb
+          if-no-files-found: error
+      - name: Update dedicated Homebrew Tap if configured
+        if: steps.check.outputs.build_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.STEPCODE_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "STEPCODE_TAP_TOKEN is not set; formula remains available as an Actions artifact." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          repo="Zereker/homebrew-tap"
+          gh api "repos/$repo" >/dev/null
+          content="$(base64 < Formula/stepcode.rb | tr -d '\\n')"
+          sha="$(gh api "repos/$repo/contents/Formula/stepcode.rb" --jq .sha 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api -X PUT "repos/$repo/contents/Formula/stepcode.rb" -f message="Update Stepcode to ${UPSTREAM_TAG}" -f content="$content" -f sha="$sha" >/dev/null
+          else
+            gh api -X PUT "repos/$repo/contents/Formula/stepcode.rb" -f message="Add Stepcode ${UPSTREAM_TAG}" -f content="$content" >/dev/null
+          fi
