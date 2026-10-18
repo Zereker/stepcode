@@ -13,7 +13,7 @@ permissions:
   actions: write
 concurrency:
   group: zcode-arm64-publish
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   build:
     if: github.repository == 'Zereker/zcode'
