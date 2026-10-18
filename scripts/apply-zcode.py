@@ -51,8 +51,10 @@ patch("codex-rs/config/src/types.rs", [
 # Adapt the upstream daemon package installer to the Stepcode executable name.
 # Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
 patch("codex-rs/app-server-daemon/src/prepare_install.rs", [
-    ('"bin/codex.exe"', '"bin/stepcode.exe"'),
-    ('        "bin/codex"\n', '        "bin/stepcode"\n'),
+    ('    let entrypoint = if cfg!(windows) {\n        "bin/codex.exe"\n    } else {\n        "bin/codex"\n    };',
+     '    let entrypoint = if cfg!(windows) {\n        "bin/stepcode.exe"\n    } else {\n        "bin/stepcode"\n    };'),
+    ('    let mut names = vec![\n        "codex-package.json",\n        if cfg!(windows) {\n            "bin/codex.exe"\n        } else {\n            "bin/codex"\n        },',
+     '    let mut names = vec![\n        "codex-package.json",\n        if cfg!(windows) {\n            "bin/stepcode.exe"\n        } else {\n            "bin/stepcode"\n        },'),
     ('symlink("bin/codex",', 'symlink("bin/stepcode",'),
 ])
 patch("codex-rs/app-server-daemon/src/managed_install.rs", [
