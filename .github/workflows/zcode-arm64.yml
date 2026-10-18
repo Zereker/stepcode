@@ -1,4 +1,4 @@
-name: Zcode ARM64 (upstream build)
+name: Stepcode ARM64 (upstream build)
 on:
   workflow_dispatch:
   schedule:
@@ -12,7 +12,7 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: zcode-arm64-publish
+  group: stepcode-arm64-publish
   cancel-in-progress: false
 jobs:
   build:
@@ -22,10 +22,10 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
     steps:
-      - name: Checkout Zcode build recipes
+      - name: Checkout Stepcode build recipes
         uses: actions/checkout@v4
         with:
-          path: zcode-build
+          path: stepcode-build
           persist-credentials: false
       - name: Checkout current official Codex
         uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
           short="${sha:0:12}"
           echo "UPSTREAM_SHA=$sha" >> "$GITHUB_ENV"
           echo "UPSTREAM_SHORT=$short" >> "$GITHUB_ENV"
-          if gh release view "zcode-$short-${GITHUB_SHA:0:8}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "stepcode-$short-${GITHUB_SHA:0:8}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "build_needed=false" >> "$GITHUB_OUTPUT"
             echo "Already released upstream $sha; skip expensive build." >> "$GITHUB_STEP_SUMMARY"
           else
@@ -52,7 +52,7 @@ jobs:
           fi
       - name: Apply minimal fail-closed identity patch
         if: steps.check.outputs.build_needed == 'true'
-        run: python3 zcode-build/scripts/apply-zcode.py codex-upstream
+        run: python3 stepcode-build/scripts/apply-zcode.py codex-upstream
       - name: Confirm Apple Silicon runner
         if: steps.check.outputs.build_needed == 'true'
         run: |
@@ -68,29 +68,29 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: zcode-cargo-${{ runner.os }}-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock') }}
+          key: stepcode-cargo-${{ runner.os }}-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock') }}
           restore-keys: |
-            zcode-cargo-${{ runner.os }}-
-      - name: Test Zcode home resolution
+            stepcode-cargo-${{ runner.os }}-
+      - name: Test Stepcode home resolution
         if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
         run: cargo test --locked -p codex-utils-home-dir
-      - name: Compile upstream as Zcode
+      - name: Compile upstream as Stepcode
         if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
         env:
           OTEL_SDK_DISABLED: 'true'
-        run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin zcode -p codex-code-mode-host --bin codex-code-mode-host
+        run: cargo build --locked --release --target aarch64-apple-darwin -p codex-cli --bin stepcode -p codex-code-mode-host --bin codex-code-mode-host
       - name: Smoke test main executable
         if: steps.check.outputs.build_needed == 'true'
         run: |
           set -euo pipefail
-          bin="codex-upstream/codex-rs/target/aarch64-apple-darwin/release/zcode"
+          bin="codex-upstream/codex-rs/target/aarch64-apple-darwin/release/stepcode"
           file "$bin" | grep -q 'Mach-O 64-bit executable arm64'
-          "$bin" --help | grep -q zcode
+          "$bin" --help | grep -q stepcode
           "$bin" --version
-          mkdir -p "$RUNNER_TEMP/zcode-home"
-          ZCODE_HOME="$RUNNER_TEMP/zcode-home" "$bin" --help >/dev/null
+          mkdir -p "$RUNNER_TEMP/stepcode-home"
+          STEPCODE_HOME="$RUNNER_TEMP/stepcode-home" "$bin" --help >/dev/null
           helper="codex-upstream/codex-rs/target/aarch64-apple-darwin/release/codex-code-mode-host"
           file "$helper" | grep -q 'Mach-O 64-bit executable arm64'
       - name: Determine official revision
@@ -103,10 +103,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/bin dist/codex-path
-          cp codex-upstream/codex-rs/target/aarch64-apple-darwin/release/zcode dist/bin/zcode
+          cp codex-upstream/codex-rs/target/aarch64-apple-darwin/release/stepcode dist/bin/stepcode
           cp codex-upstream/codex-rs/target/aarch64-apple-darwin/release/codex-code-mode-host dist/bin/codex-code-mode-host
           cp "$(command -v rg)" dist/codex-path/rg
-          chmod +x dist/bin/zcode dist/bin/codex-code-mode-host dist/codex-path/rg
+          chmod +x dist/bin/stepcode dist/bin/codex-code-mode-host dist/codex-path/rg
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -114,24 +114,24 @@ jobs:
               "layoutVersion": 2,
               "version": "0.0.0",
               "target": "aarch64-apple-darwin",
-              "entrypoint": "bin/zcode",
+              "entrypoint": "bin/stepcode",
               "resourcesDir": "codex-resources",
               "pathDir": "codex-path",
           }, indent=2) + "\n")
           PY
-          printf 'upstream=%s\nzcode_build=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" > dist/REVISION.txt
-          tar -czf "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
-          shasum -a 256 "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" > "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256"
+          printf 'upstream=%s\nstepcode_build=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" > dist/REVISION.txt
+          tar -czf "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
+          shasum -a 256 "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" > "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256"
       - name: Upload tested candidate
         if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: zcode-macos-arm64-${{ env.UPSTREAM_SHORT }}
+          name: stepcode-macos-arm64-${{ env.UPSTREAM_SHORT }}
           path: |
-            zcode-macos-arm64-*.tar.gz
-            zcode-macos-arm64-*.sha256
+            stepcode-macos-arm64-*.tar.gz
+            stepcode-macos-arm64-*.sha256
           if-no-files-found: error
-      - name: Verify release still targets current Zcode recipe
+      - name: Verify release still targets current Stepcode recipe
         if: steps.check.outputs.build_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,16 +148,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="zcode-${UPSTREAM_SHORT}-${GITHUB_SHA:0:8}"
+          tag="stepcode-${UPSTREAM_SHORT}-${GITHUB_SHA:0:8}"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Already published $tag"
             exit 0
           fi
           gh release create "$tag" \
-            "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" \
-            "zcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256" \
+            "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz" \
+            "stepcode-macos-arm64-${UPSTREAM_SHORT}.tar.gz.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Zcode ARM64 (Codex ${UPSTREAM_SHORT})" \
+            --title "Stepcode ARM64 (Codex ${UPSTREAM_SHORT})" \
             --prerelease \
-            --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Zcode identity patch. This is a prerelease; telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
+            --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Stepcode identity patch. This is a prerelease; telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
