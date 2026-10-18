@@ -13,10 +13,10 @@ if not a.tag.startswith("stepcode-rust-v"):
 version = a.tag.removeprefix("stepcode-rust-v")
 if not version or not all(x.isdigit() for x in version.split(".")) or len(a.sha256) != 64 or any(c not in "0123456789abcdef" for c in a.sha256):
     raise SystemExit("Invalid stable version or SHA256")
-url = f"https://github.com/Zereker/zcode/releases/download/{a.tag}/stepcode-macos-arm64-rust-v{version}.tar.gz"
+url = f"https://github.com/Zereker/stepcode/releases/download/{a.tag}/stepcode-macos-arm64-rust-v{version}.tar.gz"
 formula = f'''class Stepcode < Formula
   desc "Independent Stepcode CLI built from official stable Codex releases"
-  homepage "https://github.com/Zereker/zcode"
+  homepage "https://github.com/Zereker/stepcode"
   url "{url}"
   sha256 "{a.sha256}"
   version "{version}"
