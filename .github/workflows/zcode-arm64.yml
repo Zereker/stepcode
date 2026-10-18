@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    if: github.repository == 'Zereker/zcode'
+    if: github.repository == 'Zereker/stepcode'
     runs-on: macos-15
     timeout-minutes: 360
     env:
