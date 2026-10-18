@@ -9,7 +9,7 @@ import sys
 
 root = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None
 if not root or not (root / "codex-rs" / "Cargo.toml").is_file():
-    raise SystemExit("Usage: apply-stepcode.py PATH_TO_CODEX_ROOT")
+    raise SystemExit("Usage: apply-zcode.py PATH_TO_CODEX_ROOT")
 
 def patch(rel, edits):
     path = root / rel
