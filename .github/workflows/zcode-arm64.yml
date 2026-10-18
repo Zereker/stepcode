@@ -74,6 +74,32 @@ jobs:
           key: stepcode-cargo-${{ runner.os }}-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock') }}
           restore-keys: |
             stepcode-cargo-${{ runner.os }}-
+      - name: Resolve stable release lockfile and record changes
+        if: steps.check.outputs.build_needed == 'true'
+        working-directory: codex-upstream/codex-rs
+        run: |
+          set -euo pipefail
+          # Keep all versions already pinned by the official release where possible.
+          # Cargo minimally reconciles any stale lock metadata before --locked builds.
+          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.upstream"
+          cargo metadata --format-version 1 > "$RUNNER_TEMP/stepcode-cargo-metadata.json"
+          git diff -- Cargo.lock > "$RUNNER_TEMP/stepcode-Cargo.lock.patch"
+          shasum -a 256 Cargo.lock > "$RUNNER_TEMP/stepcode-Cargo.lock.sha256"
+          if [ -s "$RUNNER_TEMP/stepcode-Cargo.lock.patch" ]; then
+            echo "Stable release Cargo.lock required reconciliation:" >> "$GITHUB_STEP_SUMMARY"
+            git diff --stat -- Cargo.lock >> "$GITHUB_STEP_SUMMARY"
+          fi
+          cargo metadata --locked --format-version 1 > /dev/null
+      - name: Upload reconciled lockfile for reproducibility
+        if: steps.check.outputs.build_needed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stepcode-lockfile-${{ env.UPSTREAM_TAG }}
+          path: |
+            codex-upstream/codex-rs/Cargo.lock
+            ${{ runner.temp }}/stepcode-Cargo.lock.patch
+            ${{ runner.temp }}/stepcode-Cargo.lock.sha256
+          if-no-files-found: error
       - name: Test Stepcode home resolution
         if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
