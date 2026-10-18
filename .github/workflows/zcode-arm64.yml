@@ -19,6 +19,8 @@ jobs:
     if: github.repository == 'Zereker/zcode'
     runs-on: macos-15
     timeout-minutes: 360
+    env:
+      CARGO_BUILD_JOBS: '2'
     steps:
       - name: Checkout Zcode build recipes
         uses: actions/checkout@v4
@@ -69,14 +71,6 @@ jobs:
           key: zcode-cargo-${{ runner.os }}-${{ hashFiles('codex-upstream/codex-rs/Cargo.lock') }}
           restore-keys: |
             zcode-cargo-${{ runner.os }}-
-      - name: Setup shared Rust compiler cache
-        if: steps.check.outputs.build_needed == 'true'
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - name: Configure compiler cache
-        if: steps.check.outputs.build_needed == 'true'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
       - name: Test Zcode home resolution
         if: steps.check.outputs.build_needed == 'true'
         working-directory: codex-upstream/codex-rs
