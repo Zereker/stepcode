@@ -48,5 +48,15 @@ patch("codex-rs/tui/src/daemon_telemetry.rs", [
 patch("codex-rs/config/src/types.rs", [
     ('metrics_exporter: OtelExporterKind::Statsig,', 'metrics_exporter: OtelExporterKind::None,'),
 ])
+# Adapt the upstream daemon package installer to the Zcode executable name.
+# Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
+patch("codex-rs/app-server-daemon/src/prepare_install.rs", [
+    ('"bin/codex.exe"', '"bin/zcode.exe"'),
+    ('"bin/codex"', '"bin/zcode"'),
+])
+patch("codex-rs/app-server-daemon/src/managed_install.rs", [
+    ('if cfg!(windows) { "codex.exe" } else { "codex" }',
+     'if cfg!(windows) { "zcode.exe" } else { "zcode" }'),
+])
 print("Applied Zcode identity patch and default-off analytics/metrics patch")
 
