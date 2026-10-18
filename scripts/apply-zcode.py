@@ -52,7 +52,8 @@ patch("codex-rs/config/src/types.rs", [
 # Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
 patch("codex-rs/app-server-daemon/src/prepare_install.rs", [
     ('"bin/codex.exe"', '"bin/zcode.exe"'),
-    ('"bin/codex"', '"bin/zcode"'),
+    ('        "bin/codex"\\n', '        "bin/zcode"\\n'),
+    ('symlink("bin/codex",', 'symlink("bin/zcode",'),
 ])
 patch("codex-rs/app-server-daemon/src/managed_install.rs", [
     ('if cfg!(windows) { "codex.exe" } else { "codex" }',
