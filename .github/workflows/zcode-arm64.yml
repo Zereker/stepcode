@@ -195,7 +195,7 @@ jobs:
           fi
           repo="Zereker/homebrew-tap"
           gh api "repos/$repo" >/dev/null
-          content="$(base64 < Formula/stepcode.rb | tr -d '\\n')"
+          content="$(python3 -c 'import base64; print(base64.b64encode(open("Formula/stepcode.rb","rb").read()).decode())')"
           sha="$(gh api "repos/$repo/contents/Formula/stepcode.rb" --jq .sha 2>/dev/null || true)"
           if [ -n "$sha" ]; then
             gh api -X PUT "repos/$repo/contents/Formula/stepcode.rb" -f message="Update Stepcode to ${UPSTREAM_TAG}" -f content="$content" -f sha="$sha" >/dev/null
