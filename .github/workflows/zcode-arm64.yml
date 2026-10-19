@@ -14,6 +14,7 @@ on:
 permissions:
   contents: write
   actions: write
+  issues: write
 concurrency:
   group: stepcode-arm64-publish
   cancel-in-progress: false
@@ -214,6 +215,37 @@ jobs:
             echo "Build recipe changed during compile: refusing stale release" >&2
             exit 1
           fi
+      - name: Verify packaged CLI and daemon
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          set -euo pipefail
+          test -f dist/codex-package.json
+          test -x dist/bin/stepcode
+          test -x dist/bin/codex-code-mode-host
+          test -x dist/codex-path/rg
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d = json.loads(Path("dist/codex-package.json").read_text())
+          assert d["entrypoint"] == "bin/stepcode"
+          assert d["target"] == "aarch64-apple-darwin"
+          PY
+          isolated="$(mktemp -d)"
+          trap 'rm -rf "$isolated"' EXIT
+          STEPCODE_HOME="$isolated/home" dist/bin/stepcode --version
+          STEPCODE_HOME="$isolated/home" dist/bin/stepcode doctor --summary > "$RUNNER_TEMP/stepcode-doctor.txt"
+          # Test fresh managed daemon bootstrap using the packaged binary,
+          # not only the bare executable; do not affect any existing Codex state.
+          STEPCODE_HOME="$isolated/home" dist/bin/stepcode app-server daemon start > "$RUNNER_TEMP/stepcode-daemon.json"
+          STEPCODE_HOME="$isolated/home" dist/bin/stepcode app-server daemon version
+          STEPCODE_HOME="$isolated/home" dist/bin/stepcode app-server daemon stop
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=json.loads(Path(os.environ["RUNNER_TEMP"],"stepcode-daemon.json").read_text())
+          assert "/.stepcode/" not in p["socketPath"] or "stepcode" in p["socketPath"]
+          assert "stepcode" in p["managedCodexPath"]
+          PY
       - name: Publish Stepcode release
         if: steps.check.outputs.build_needed == 'true'
         env:
@@ -246,6 +278,15 @@ jobs:
           sha="${digest#sha256:}"
           python3 stepcode-build/scripts/update-homebrew-formula.py --tag "$tag" --sha256 "$sha"
           ruby -c Formula/stepcode.rb
+      - name: Check Homebrew formula before tap update
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          set -euo pipefail
+          ruby -c Formula/stepcode.rb
+          grep -F "version \"$(echo "$UPSTREAM_TAG" | sed 's/^rust-v//')\"" Formula/stepcode.rb
+          if [ "$STEPCODE_REVISION" -gt 0 ]; then
+            grep -F "revision $STEPCODE_REVISION" Formula/stepcode.rb
+          fi
       - name: Upload Homebrew formula candidate
         if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
@@ -260,8 +301,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$GH_TOKEN" ]; then
-            echo "STEPCODE_TAP_TOKEN is not set; formula remains available as an Actions artifact." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo "STEPCODE_TAP_TOKEN missing; refusing to report complete release." >&2
+            exit 1
           fi
           repo="Zereker/homebrew-tap"
           gh api "repos/$repo" >/dev/null
@@ -272,3 +313,20 @@ jobs:
           else
             gh api -X PUT "repos/$repo/contents/Formula/stepcode.rb" -f message="Add Stepcode ${UPSTREAM_TAG}" -f content="$content" >/dev/null
           fi
+
+  notify:
+    name: Report new stable version outcome
+    needs: build
+    if: ${{ always() && needs.build.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write failure summary and open tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          echo "Stepcode stable-release validation failed: $RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Stepcode stable-release CI failed (#${GITHUB_RUN_ID})" \
+            --body "The stable-release build or publish verification failed. Existing Releases and Homebrew Tap were not intentionally overwritten. Check the failed step: $RUN_URL"
