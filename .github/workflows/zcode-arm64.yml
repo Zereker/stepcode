@@ -9,6 +9,7 @@ on:
       - 'scripts/apply-zcode.py'
       - 'scripts/verify-stepcode-patch.py'
       - 'scripts/update-homebrew-formula.py'
+      - 'release-revisions.json'
       - '.github/workflows/zcode-arm64.yml'
 permissions:
   contents: write
@@ -40,7 +41,13 @@ jobs:
           test -n "$tag"
           echo "UPSTREAM_TAG=$tag" >> "$GITHUB_ENV"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if gh release view "stepcode-$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          revision="$(python3 -c 'import json,sys; print(json.load(open("stepcode-build/release-revisions.json")).get(sys.argv[1], 0))' "$tag")"
+          case "$revision" in ''|*[!0-9]*) echo "Invalid revision" >&2; exit 1;; esac
+          suffix=""
+          if [ "$revision" -gt 0 ]; then suffix="-r$revision"; fi
+          echo "STEPCODE_REVISION=$revision" >> "$GITHUB_ENV"
+          echo "STEPCODE_SUFFIX=$suffix" >> "$GITHUB_ENV"
+          if gh release view "stepcode-$tag$suffix" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "build_needed=false" >> "$GITHUB_OUTPUT"
             echo "Stepcode for stable Codex release $tag already exists." >> "$GITHUB_STEP_SUMMARY"
           else
@@ -184,14 +191,14 @@ jobs:
               "pathDir": "codex-path",
           }, indent=2) + "\n")
           PY
-          printf 'upstream=%s\nstepcode_build=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" > dist/REVISION.txt
-          tar -czf "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
-          shasum -a 256 "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" > "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz.sha256"
+          printf 'upstream=%s\nstepcode_build=%s\nrevision=%s\n' "$UPSTREAM_SHA" "$GITHUB_SHA" "$STEPCODE_REVISION" > dist/REVISION.txt
+          tar -czf "stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz" -C dist bin codex-path codex-package.json REVISION.txt
+          shasum -a 256 "stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz" > "stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz.sha256"
       - name: Upload tested candidate
         if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: stepcode-macos-arm64-${{ env.UPSTREAM_TAG }}
+          name: stepcode-macos-arm64-${{ env.UPSTREAM_TAG }}-r${{ env.STEPCODE_REVISION }}
           path: |
             stepcode-macos-arm64-*.tar.gz
             stepcode-macos-arm64-*.sha256
@@ -213,17 +220,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="stepcode-${UPSTREAM_TAG}"
+          tag="stepcode-${UPSTREAM_TAG}${STEPCODE_SUFFIX}"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Already published $tag"
             exit 0
           fi
           gh release create "$tag" \
-            "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz" \
-            "stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz.sha256" \
+            "stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz" \
+            "stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Stepcode ARM64 (${UPSTREAM_TAG})" \
+            --title "Stepcode ARM64 (${UPSTREAM_TAG}${STEPCODE_SUFFIX})" \
             --notes "Built from official openai/codex commit $UPSTREAM_SHA with the small Stepcode identity patch. Telemetry and full isolation requirements have NOT been certified. No AgentD modifications."
 
       - name: Generate Homebrew formula from verified release
@@ -232,8 +239,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="stepcode-${UPSTREAM_TAG}"
-          filename="stepcode-macos-arm64-${UPSTREAM_TAG}.tar.gz"
+          tag="stepcode-${UPSTREAM_TAG}${STEPCODE_SUFFIX}"
+          filename="stepcode-macos-arm64-${UPSTREAM_TAG}${STEPCODE_SUFFIX}.tar.gz"
           digest="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq ".assets[] | select(.name == \"$filename\") | .digest")"
           test "${digest#sha256:}" != "$digest"
           sha="${digest#sha256:}"
@@ -243,7 +250,7 @@ jobs:
         if: steps.check.outputs.build_needed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: stepcode-homebrew-formula-${{ env.UPSTREAM_TAG }}
+          name: stepcode-homebrew-formula-${{ env.UPSTREAM_TAG }}-r${{ env.STEPCODE_REVISION }}
           path: Formula/stepcode.rb
           if-no-files-found: error
       - name: Update dedicated Homebrew Tap if configured
