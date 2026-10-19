@@ -61,5 +61,39 @@ patch("codex-rs/app-server-daemon/src/managed_install.rs", [
     ('if cfg!(windows) { "codex.exe" } else { "codex" }',
      'if cfg!(windows) { "stepcode.exe" } else { "stepcode" }'),
 ])
-print("Applied Stepcode identity patch and default-off analytics/metrics patch")
+# Isolate SQLite overrides and the daemon's inherited process environment.
+patch("codex-rs/state/src/lib.rs", [
+    ('pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";',
+     'pub const SQLITE_HOME_ENV: &str = "STEPCODE_SQLITE_HOME";'),
+])
+# The old CODEX_* values must never be propagated to Stepcode's daemon.
+path = root / "codex-rs/app-server-daemon/src/background_command.rs"
+original = path.read_text()
+if original.count('"CODEX_HOME"') != 2 or original.count('"CODEX_SQLITE_HOME"') != 4:
+    raise SystemExit("FAIL: unexpected daemon environment variable layout")
+path.write_text(original.replace('"CODEX_HOME"', '"STEPCODE_HOME"')
+                        .replace('"CODEX_SQLITE_HOME"', '"STEPCODE_SQLITE_HOME"'))
+
+# All normal CLI, TUI, app-server and exec calls use this unified OTEL
+# constructor. Return no provider even when the config explicitly requests
+# Statsig or OTLP; leave model/API network traffic and local diagnostics intact.
+path = root / "codex-rs/core/src/otel_init.rs"
+original = path.read_text()
+start = original.find("pub fn build_provider(")
+end = original.find("\npub fn record_process_start(", start)
+if start < 0 or end < 0 or original.count("pub fn build_provider(") != 1:
+    raise SystemExit("FAIL: upstream OTEL provider entrypoint changed")
+replacement = """pub fn build_provider(
+    _config: &Config,
+    _service_version: &str,
+    _service_name_override: Option<&str>,
+    _default_analytics_enabled: bool,
+) -> Result<Option<OtelProvider>, Box<dyn Error>> {
+    // Stepcode policy: never construct Statsig, OTLP logs, traces or metrics.
+    Ok(None)
+}
+"""
+path.write_text(original[:start] + replacement + original[end:])
+
+print("Applied Stepcode identity patch and forced-off telemetry and isolated SQLite patch")
 
