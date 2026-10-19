@@ -69,7 +69,7 @@ patch("codex-rs/state/src/lib.rs", [
 # The old CODEX_* values must never be propagated to Stepcode's daemon.
 path = root / "codex-rs/app-server-daemon/src/background_command.rs"
 original = path.read_text()
-if original.count('"CODEX_HOME"') != 2 or original.count('"CODEX_SQLITE_HOME"') != 4:
+if original.count('"CODEX_HOME"') != 2 or original.count('"CODEX_SQLITE_HOME"') != 3:
     raise SystemExit("FAIL: unexpected daemon environment variable layout")
 path.write_text(original.replace('"CODEX_HOME"', '"STEPCODE_HOME"')
                         .replace('"CODEX_SQLITE_HOME"', '"STEPCODE_SQLITE_HOME"'))
