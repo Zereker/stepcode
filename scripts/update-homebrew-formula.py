@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate a Stepcode Homebrew formula for a tested GitHub Release asset."""
 import argparse
+import re
 from pathlib import Path
 
 p = argparse.ArgumentParser()
@@ -8,18 +9,18 @@ p.add_argument("--tag", required=True)
 p.add_argument("--sha256", required=True)
 p.add_argument("--output", default="Formula/stepcode.rb")
 a = p.parse_args()
-if not a.tag.startswith("stepcode-rust-v"):
-    raise SystemExit("Refusing non-stable Stepcode release tag")
-version = a.tag.removeprefix("stepcode-rust-v")
-if not version or not all(x.isdigit() for x in version.split(".")) or len(a.sha256) != 64 or any(c not in "0123456789abcdef" for c in a.sha256):
+match = re.fullmatch(r"stepcode-rust-v(\d+\.\d+\.\d+)(?:-r([1-9]\d*))?", a.tag)
+if not match or len(a.sha256) != 64 or any(c not in "0123456789abcdef" for c in a.sha256):
     raise SystemExit("Invalid stable version or SHA256")
-url = f"https://github.com/Zereker/stepcode/releases/download/{a.tag}/stepcode-macos-arm64-rust-v{version}.tar.gz"
+version, revision = match.group(1), int(match.group(2) or 0)
+url = f"https://github.com/Zereker/stepcode/releases/download/{a.tag}/stepcode-macos-arm64-{a.tag.removeprefix('stepcode-')}.tar.gz"
 formula = f'''class Stepcode < Formula
   desc "Independent Stepcode CLI built from official stable Codex releases"
   homepage "https://github.com/Zereker/stepcode"
   url "{url}"
   sha256 "{a.sha256}"
   version "{version}"
+  revision {revision}
 
   depends_on :macos
   depends_on arch: :arm64
