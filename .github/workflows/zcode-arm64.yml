@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/apply-zcode.py'
+      - 'scripts/verify-stepcode-patch.py'
       - 'scripts/update-homebrew-formula.py'
       - '.github/workflows/zcode-arm64.yml'
 permissions:
@@ -46,7 +47,6 @@ jobs:
             echo "build_needed=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Checkout official stable Codex release
-        if: steps.check.outputs.build_needed == 'true'
         uses: actions/checkout@v4
         with:
           repository: openai/codex
@@ -54,8 +54,9 @@ jobs:
           path: codex-upstream
           persist-credentials: false
       - name: Apply minimal fail-closed identity patch
-        if: steps.check.outputs.build_needed == 'true'
         run: python3 stepcode-build/scripts/apply-zcode.py codex-upstream
+      - name: Verify Stepcode P0 isolation patch
+        run: python3 stepcode-build/scripts/verify-stepcode-patch.py codex-upstream
       - name: Confirm Apple Silicon runner
         if: steps.check.outputs.build_needed == 'true'
         run: |
