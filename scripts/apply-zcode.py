@@ -49,12 +49,10 @@ patch("codex-rs/config/src/types.rs", [
     ('metrics_exporter: OtelExporterKind::Statsig,', 'metrics_exporter: OtelExporterKind::None,'),
 ])
 # Adapt the upstream daemon package installer to the Stepcode executable name.
-# Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
+# 0.164.0 validates the entrypoint dynamically; do not patch the removed names list.\n# Retain upstream helper names (code-mode host, rg) to avoid changing their protocols.
 patch("codex-rs/app-server-daemon/src/prepare_install.rs", [
     ('    let entrypoint = if cfg!(windows) {\n        "bin/codex.exe"\n    } else {\n        "bin/codex"\n    };',
      '    let entrypoint = if cfg!(windows) {\n        "bin/stepcode.exe"\n    } else {\n        "bin/stepcode"\n    };'),
-    ('    let mut names = vec![\n        "codex-package.json",\n        if cfg!(windows) {\n            "bin/codex.exe"\n        } else {\n            "bin/codex"\n        },',
-     '    let mut names = vec![\n        "codex-package.json",\n        if cfg!(windows) {\n            "bin/stepcode.exe"\n        } else {\n            "bin/stepcode"\n        },'),
     ('symlink("bin/codex",', 'symlink("bin/stepcode",'),
 ])
 patch("codex-rs/app-server-daemon/src/managed_install.rs", [
