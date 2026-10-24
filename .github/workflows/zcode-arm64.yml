@@ -320,13 +320,14 @@ jobs:
     if: ${{ always() && needs.build.result == 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Write failure summary and open tracking issue
+      - name: Write failure summary
         env:
-          GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          echo "Stepcode stable-release validation failed: $RUN_URL" >> "$GITHUB_STEP_SUMMARY"
-          gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "Stepcode stable-release CI failed (#${GITHUB_RUN_ID})" \
-            --body "The stable-release build or publish verification failed. Existing Releases and Homebrew Tap were not intentionally overwritten. Check the failed step: $RUN_URL"
+          {
+            echo "## Stepcode stable-release validation failed"
+            echo
+            echo "Build or publish verification failed. See [workflow run]($RUN_URL) for the failing step and logs."
+            echo "Existing Releases and Homebrew Tap were not intentionally overwritten."
+          } >> "$GITHUB_STEP_SUMMARY"
