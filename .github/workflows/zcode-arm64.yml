@@ -233,7 +233,16 @@ jobs:
           isolated="$(mktemp -d)"
           trap 'rm -rf "$isolated"' EXIT
           STEPCODE_HOME="$isolated/home" dist/bin/stepcode --version
-          STEPCODE_HOME="$isolated/home" dist/bin/stepcode doctor --summary > "$RUNNER_TEMP/stepcode-doctor.txt"
+          mkdir -p "$isolated/home"
+          # Doctor checks runner-specific authentication/network/terminal state;
+          # it returns 1 for any failed diagnostic, not necessarily a broken package.
+          # Record its complete output without masking package/daemon smoke failures.
+          if STEPCODE_HOME="$isolated/home" dist/bin/stepcode doctor --summary > "$RUNNER_TEMP/stepcode-doctor.txt" 2>&1; then
+            echo "Doctor diagnostics passed."
+          else
+            echo "::warning::Doctor reported runner-environment failures; see diagnostics below."
+          fi
+          cat "$RUNNER_TEMP/stepcode-doctor.txt"
           # Test fresh managed daemon bootstrap using the packaged binary,
           # not only the bare executable; do not affect any existing Codex state.
           STEPCODE_HOME="$isolated/home" dist/bin/stepcode app-server daemon start > "$RUNNER_TEMP/stepcode-daemon.json"
