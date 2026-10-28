@@ -14,12 +14,31 @@ on:
 permissions:
   contents: write
   actions: write
-  issues: write
 concurrency:
   group: stepcode-arm64-publish
   cancel-in-progress: false
 jobs:
+  runner_preflight:
+    name: Record macOS runner scheduling diagnostics
+    if: github.repository == 'Zereker/stepcode'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record runner requirements and workflow run
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "## macOS runner scheduling preflight"
+            echo "Requested runner: macos-15 (GitHub-hosted; Apple Silicon build)"
+            echo "Run: $RUN_URL"
+            echo "Attempt: $GITHUB_RUN_ATTEMPT"
+            echo "This Ubuntu preflight cannot guarantee macOS runner capacity."
+            echo "If build is cancelled with runner_id=0 and no steps, investigate runner allocation, billing and GitHub Actions platform availability."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build:
+    needs: runner_preflight
     if: github.repository == 'Zereker/stepcode'
     runs-on: macos-15
     timeout-minutes: 360
@@ -324,19 +343,37 @@ jobs:
           fi
 
   notify:
-    name: Report new stable version outcome
-    needs: build
-    if: ${{ always() && needs.build.result == 'failure' }}
+    name: Report build failure or runner cancellation
+    needs: [runner_preflight, build]
+    if: ${{ always() && (needs.runner_preflight.result == 'failure' || needs.runner_preflight.result == 'cancelled' || needs.build.result == 'failure' || needs.build.result == 'cancelled') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Write failure summary
+      - name: Diagnose failed or cancelled build
         env:
+          GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PREFLIGHT_RESULT: ${{ needs.runner_preflight.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           set -euo pipefail
           {
-            echo "## Stepcode stable-release validation failed"
+            echo "## Stepcode build did not complete successfully"
             echo
-            echo "Build or publish verification failed. See [workflow run]($RUN_URL) for the failing step and logs."
-            echo "Existing Releases and Homebrew Tap were not intentionally overwritten."
+            echo "Run: $RUN_URL (attempt $GITHUB_RUN_ATTEMPT)"
+            echo "Runner preflight: $PREFLIGHT_RESULT"
+            echo "Build result: $BUILD_RESULT"
+            echo
+            echo "### GitHub job diagnostics"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Job metadata stays available even when a macOS runner was never assigned.
+          if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --jq '.jobs[] | "- \(.name): \(.conclusion // .status); runner_id=\(.runner_id // "null"); runner=\(.runner_name // ""); steps=\(.steps | length)"' >> "$GITHUB_STEP_SUMMARY"; then
+            echo "GitHub jobs API query succeeded." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Unable to fetch job metadata; inspect the Actions run directly." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo
+            echo "A cancelled job with runner_id=0 and zero steps was not assigned a runner; it is not evidence of a Rust build error."
+            echo "An entire workflow cancellation may prevent this notification job from starting."
           } >> "$GITHUB_STEP_SUMMARY"
