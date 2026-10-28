@@ -1,6 +1,11 @@
 name: Stepcode ARM64 (upstream build)
 on:
   workflow_dispatch:
+    inputs:
+      runner_diagnostics:
+        description: 'Only run macOS Runner A/B checks without publishing'
+        type: boolean
+        default: false
   schedule:
     - cron: '23 3 * * *'
   push:
@@ -18,9 +23,34 @@ concurrency:
   group: stepcode-arm64-publish
   cancel-in-progress: false
 jobs:
+  runner_ab:
+    name: Runner A/B (${{ matrix.runner }})
+    if: ${{ github.repository == 'Zereker/stepcode' && ((github.event_name == 'workflow_dispatch' && inputs.runner_diagnostics == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[runner-ab]'))) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Report runner allocation
+        run: |
+          set -euo pipefail
+          echo "Runner: $RUNNER_NAME"
+          uname -m
+          sw_vers
+          xcodebuild -version
+          {
+            echo "## Runner A/B ${{ matrix.runner }}"
+            echo "Assigned runner: $RUNNER_NAME"
+            echo "Architecture: $(uname -m)"
+            echo "macOS: $(sw_vers -productVersion)"
+            echo "Xcode: $(xcodebuild -version | head -n 1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   runner_preflight:
     name: Record macOS runner scheduling diagnostics
-    if: github.repository == 'Zereker/stepcode'
+    if: ${{ github.repository == 'Zereker/stepcode' && !(github.event_name == 'workflow_dispatch' && inputs.runner_diagnostics == true) && !(github.event_name == 'push' && contains(github.event.head_commit.message, '[runner-ab]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -39,7 +69,7 @@ jobs:
 
   build:
     needs: runner_preflight
-    if: github.repository == 'Zereker/stepcode'
+    if: ${{ needs.runner_preflight.result == 'success' }}
     runs-on: macos-15
     timeout-minutes: 360
     env:
