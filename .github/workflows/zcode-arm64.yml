@@ -20,7 +20,7 @@ permissions:
   contents: write
   actions: write
 concurrency:
-  group: stepcode-arm64-publish
+  group: ${{ ((github.event_name == 'workflow_dispatch' && inputs.runner_diagnostics == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[runner-ab]'))) && 'stepcode-runner-ab' || 'stepcode-arm64-publish' }}
   cancel-in-progress: false
 jobs:
   runner_ab:
