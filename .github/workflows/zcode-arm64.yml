@@ -22,6 +22,7 @@ permissions:
 concurrency:
   group: ${{ ((github.event_name == 'workflow_dispatch' && inputs.runner_diagnostics == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[runner-ab]'))) && 'stepcode-runner-ab' || 'stepcode-arm64-publish' }}
   cancel-in-progress: false
+  queue: max
 jobs:
   runner_ab:
     name: Runner A/B (${{ matrix.runner }})
@@ -29,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-latest]
+        runner: [macos-15, macos-26]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
