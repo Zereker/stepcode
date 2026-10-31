@@ -75,6 +75,8 @@ jobs:
     timeout-minutes: 360
     env:
       CARGO_BUILD_JOBS: '2'
+      # Use system Git for Cargo Git dependencies (including V8 submodules).
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
     steps:
       - name: Checkout Stepcode build recipes
         uses: actions/checkout@v4
